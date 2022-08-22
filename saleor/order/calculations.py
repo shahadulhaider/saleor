@@ -1,5 +1,5 @@
 from decimal import Decimal
-from typing import Iterable, Optional, Tuple
+from typing import TYPE_CHECKING, Iterable, Optional, Tuple
 
 from django.db import transaction
 from django.db.models import prefetch_related_objects
@@ -9,9 +9,13 @@ from ..core.prices import quantize_price
 from ..core.taxes import TaxData, TaxError, zero_taxed_money
 from ..discount import OrderDiscountType
 from ..plugins.manager import PluginsManager
+from ..site.models import Site
 from . import ORDER_EDITABLE_STATUS, utils
 from .interface import OrderTaxedPricesData
 from .models import Order, OrderLine
+
+if TYPE_CHECKING:
+    from ..site.models import SiteSettings
 
 
 def _recalculate_order_prices(
@@ -96,6 +100,7 @@ def fetch_order_prices_if_expired(
     manager: PluginsManager,
     lines: Optional[Iterable[OrderLine]] = None,
     force_update: bool = False,
+    site_settings: "SiteSettings" = None,
 ) -> Tuple[Order, Optional[Iterable[OrderLine]]]:
     """Fetch order prices with taxes.
 
@@ -128,12 +133,19 @@ def fetch_order_prices_if_expired(
 
     _recalculate_order_prices(manager, order, lines)
 
-    if not order.tax_exemption:
-        tax_data = manager.get_taxes_for_order(order)
+    tax_data = manager.get_taxes_for_order(order)
+
+    if site_settings is None:
+        site_settings = Site.objects.get_current().settings
 
     with transaction.atomic(savepoint=False):
         if tax_data:
             _apply_tax_data(order, lines, tax_data)
+
+        _recalculate_order_discounts(order, lines)
+
+        if order.tax_exemption and site_settings.include_taxes_in_prices:
+            _exempt_taxes_in_order(order, lines)
 
         order.save(
             update_fields=[
@@ -162,6 +174,24 @@ def fetch_order_prices_if_expired(
             ],
         )
         return order, lines
+
+
+def _exempt_taxes_in_order(order, lines):
+    order.total_gross_amount = order.total_net_amount
+    order.undiscounted_total_gross_amount = order.undiscounted_total_net_amount
+    order.shipping_price_gross_amount = order.shipping_price_net_amount
+    order.shipping_tax_rate = Decimal("0.00")
+
+    for line in lines:
+        total_price_net_amount = line.total_price_net_amount
+        unit_price_net_amount = line.unit_price_net_amount
+        undiscounted_unit_price_net_amount = line.undiscounted_unit_price_net_amount
+        undiscounted_total_price_net_amount = line.undiscounted_total_price_net_amount
+        line.unit_price_gross_amount = unit_price_net_amount
+        line.undiscounted_unit_price_gross_amount = undiscounted_unit_price_net_amount
+        line.total_price_gross_amount = total_price_net_amount
+        line.undiscounted_total_price_gross_amount = undiscounted_total_price_net_amount
+        line.tax_rate = Decimal("0.00")
 
 
 def _find_order_line(

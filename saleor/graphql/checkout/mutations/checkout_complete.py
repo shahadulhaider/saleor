@@ -22,10 +22,10 @@ from ...account.i18n import I18nMixin
 from ...app.dataloaders import load_app
 from ...core.descriptions import ADDED_IN_34, DEPRECATED_IN_3X_INPUT
 from ...core.fields import JSONString
-from ...core.mutations import BaseMutation
 from ...core.scalars import UUID
 from ...core.types import CheckoutError
 from ...core.validators import validate_one_of_args_is_in_mutation
+from ...meta.mutations import BaseMutationWithMetadata
 from ...discount.dataloaders import load_discounts
 from ...order.types import Order
 from ...utils import get_user_or_app_from_context
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from ....account.models import Address
 
 
-class CheckoutComplete(BaseMutation, I18nMixin):
+class CheckoutComplete(BaseMutationWithMetadata, I18nMixin):
     order = graphene.Field(Order, description="Placed order.")
     confirmation_needed = graphene.Boolean(
         required=True,
@@ -53,7 +53,7 @@ class CheckoutComplete(BaseMutation, I18nMixin):
         ),
     )
 
-    class Arguments:
+    class Arguments(BaseMutationWithMetadata.Arguments):
         id = graphene.ID(
             description="The checkout's ID." + ADDED_IN_34,
             required=False,
@@ -100,6 +100,7 @@ class CheckoutComplete(BaseMutation, I18nMixin):
         )
         error_type_class = CheckoutError
         error_type_field = "checkout_errors"
+        metadata_permissions_map_key = "Checkout"
 
     @classmethod
     def validate_checkout_addresses(
@@ -260,6 +261,8 @@ class CheckoutComplete(BaseMutation, I18nMixin):
                 site_settings=info.context.site.settings,
                 tracking_code=tracking_code,
                 redirect_url=data.get("redirect_url"),
+                metadata_list=data.get("metadata"),
+                private_metadata_list=data.get("private_metadata"),
             )
         # If gateway returns information that additional steps are required we need
         # to inform the frontend and pass all required data

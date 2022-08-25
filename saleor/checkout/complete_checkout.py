@@ -465,7 +465,9 @@ def _create_order(
     user: User,
     app: Optional["App"],
     manager: "PluginsManager",
-    site_settings=None
+    site_settings=None,
+    metadata_list=None,
+    private_metadata_list=None
 ) -> Order:
     """Create an order from the checkout.
 
@@ -561,8 +563,17 @@ def _create_order(
 
     # copy metadata from the checkout into the new order
     order.metadata = checkout.metadata
+    if metadata_list:
+        order.store_value_in_metadata({data.key: data.value for data in metadata_list})
+
     order.redirect_url = checkout.redirect_url
+
     order.private_metadata = checkout.private_metadata
+    if private_metadata_list:
+        order.store_value_in_private_metadata(
+            {data.key: data.value for data in private_metadata_list}
+        )
+
     update_order_charge_data(order, with_save=False)
     update_order_authorize_data(order, with_save=False)
     order.search_vector = FlatConcatSearchVector(
@@ -731,6 +742,8 @@ def complete_checkout(
     site_settings=None,
     tracking_code=None,
     redirect_url=None,
+    metadata_list=None,
+    private_metadata_list=None,
 ) -> Tuple[Optional[Order], bool, dict]:
     """Logic required to finalize the checkout and convert it to order.
 
@@ -803,6 +816,8 @@ def complete_checkout(
                 app=app,
                 manager=manager,
                 site_settings=site_settings,
+                metadata_list=metadata_list,
+                private_metadata_list=private_metadata_list,
             )
             # remove checkout after order is successfully created
             checkout.delete()
@@ -999,6 +1014,8 @@ def _create_order_from_checkout(
     user: User,
     app: Optional["App"],
     tracking_code: Optional[str] = None,
+    metadata_list: Optional[List] = None,
+    private_metadata_list: Optional[List] = None,
 ):
     from ..order.utils import add_gift_cards_to_order
 
@@ -1036,6 +1053,16 @@ def _create_order_from_checkout(
         if site_settings.automatically_confirm_all_new_orders
         else OrderStatus.UNCONFIRMED
     )
+
+    # update metadata
+    if metadata_list:
+        checkout_info.checkout.store_value_in_metadata(
+            {data.key: data.value for data in metadata_list}
+        )
+    if private_metadata_list:
+        checkout_info.checkout.store_value_in_private_metadata(
+            {data.key: data.value for data in private_metadata_list}
+        )
 
     # order
     order = Order.objects.create(
@@ -1124,6 +1151,8 @@ def create_order_from_checkout(
     app: Optional["App"],
     tracking_code: str,
     delete_checkout: bool = True,
+    metadata_list: Optional[List] = None,
+    private_metadata_list: Optional[List] = None,
 ) -> Order:
     """Crate order from checkout.
 
@@ -1157,6 +1186,8 @@ def create_order_from_checkout(
                 user=user,
                 app=app,
                 tracking_code=tracking_code,
+                metadata_list=metadata_list,
+                private_metadata_list=private_metadata_list,
             )
             if delete_checkout:
                 checkout_info.checkout.delete()

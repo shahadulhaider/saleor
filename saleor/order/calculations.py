@@ -142,8 +142,6 @@ def fetch_order_prices_if_expired(
         if tax_data:
             _apply_tax_data(order, lines, tax_data)
 
-        _recalculate_order_discounts(order, lines)
-
         if order.tax_exemption and site_settings.include_taxes_in_prices:
             _exempt_taxes_in_order(order, lines)
 

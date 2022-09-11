@@ -1,0 +1,128 @@
+services:
+  - name: saleor
+    type: web
+    env: python
+    repo: https://github.com/render-examples/saleor
+    buildCommand: ./render-build.sh
+    startCommand: ./render-start.sh server
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: saleor-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: saleor-redis
+          property: connectionString
+      - fromGroup: saleor-settings
+  
+  - name: saleor-redis
+    type: redis
+    ipAllowList: []
+  
+  - name: saleor-dashboard
+    type: web
+    env: static
+    repo: https://github.com/saleor/saleor-dashboard
+    buildCommand: npm install && API_URI="$TEMP_API_URI/graphql/" npm run build
+    staticPublishPath: ./build/
+    envVars:
+      - key: TEMP_API_URI
+        fromService:
+          name: saleor
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: APP_MOUNT_URI
+        value: /dashboard/
+      - key: STATIC_URL
+        value: /dashboard/
+    routes:
+      - type: rewrite
+        source: /
+        destination: /dashboard/index.html
+
+  - name: saleor-storefront
+    type: web
+    env: node
+    repo: https://github.com/saleor/react-storefront
+    buildCommand: >
+      pnpm install
+      && NEXT_PUBLIC_API_URI=$TEMP_NEXT_PUBLIC_API_URL/graphql/ pnpm run build
+      && pnpm run postbuild
+    startCommand: NEXT_PUBLIC_API_URI=$TEMP_NEXT_PUBLIC_API_URL/graphql/ pnpm start
+    envVars:
+      - key: TEMP_NEXT_PUBLIC_API_URL
+        fromService:
+          name: saleor
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: NEXT_PUBLIC_IMAGE_CONVERSION_FORMATS
+        value: image/avif,image/webp
+  
+  - type: worker
+    name: saleor-worker
+    env: python
+    repo: https://github.com/render-examples/saleor
+    plan: standard
+    buildCommand: ./render-build.sh
+    startCommand: ./render-start.sh worker
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: saleor-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: saleor-redis
+          property: connectionString
+      - key: CLOUDAMQP_URL
+        sync: false
+      - fromGroup: saleor-settings
+
+  - type: cron
+    name: exchange-rates
+    env: python
+    schedule: "0 1 * * *"
+    buildCommand: ./render-build.sh
+    startCommand: ./render-start.sh cron
+    repo: https://github.com/render-examples/saleor
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: saleor-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: saleor-redis
+          property: connectionString
+      - key: OPENEXCHANGERATES_API_KEY
+        sync: false
+      - fromGroup: saleor-settings
+
+databases:
+  - name: saleor-db
+    ipAllowList: [] # only allow connections from services in this Render account
+
+envVarGroups:
+  - name: saleor-settings
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.9.0
+      - key: DJANGO_SETTINGS_MODULE
+        value: saleor.settings
+      - key: DEBUG
+        value: False
+      - key: NPM_CONFIG_PRODUCTION
+        value: false
+      - key: DEFAULT_FROM_EMAIL
+        value: noreply@example.com
+      - key: ENABLE_ACCOUNT_CONFIRMATION_BY_EMAIL
+        value: False
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ALLOWED_CLIENT_HOSTS
+        value: .onrender.com # If using custom domains, change this to a comma-separated list of your storefront and dashboard hostnames
+
